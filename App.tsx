@@ -3,6 +3,7 @@ import { Button, SafeAreaView, StyleSheet, View, Text } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { supabase } from './utils/supabase';
 import { Audio } from 'expo-av';
+import InCallManager from 'react-native-incall-manager';
 import {
   mediaDevices,
   RTCPeerConnection,
@@ -46,6 +47,9 @@ const App = () => {
 
     // Enable audio
     await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+    // Start InCallManager and force speaker
+    InCallManager.start({ media: 'audio' });
+    InCallManager.setForceSpeakerphoneOn(true);
 
     // Create a peer connection
     const pc = new RTCPeerConnection();
@@ -99,6 +103,9 @@ const App = () => {
 
   // Stop current session, clean up peer connection and data channel
   function stopSession() {
+    // Stop InCallManager
+    InCallManager.stop();
+    
     if (dataChannel) {
       dataChannel.close();
     }
