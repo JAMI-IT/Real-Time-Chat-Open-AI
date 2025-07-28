@@ -5,7 +5,8 @@ import {
   StyleSheet,
   View,
   Text,
-  ScrollView,
+  Animated,
+  Dimensions,
   Alert,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
@@ -16,17 +17,22 @@ import {
   mediaDevices,
   RTCPeerConnection,
   MediaStream,
-  RTCView,
 } from "react-native-webrtc-web-shim";
-import {
-  clientTools,
-  clientToolsSchema,
-  emotionFramework,
-} from "./utils/tools";
 
-import * as Brightness from "expo-brightness";
+const { width } = Dimensions.get("window");
 
-// Enhanced emotion detection interfaces for pastoral care
+// Enhanced interfaces based on your emotion detection framework
+interface ConversationState {
+  intent: string;
+  tone: string;
+  emotion: string;
+  intensity: number;
+  confidence: number;
+  isUserSpeaking: boolean;
+  isAISpeaking: boolean;
+  spiritualAlerts: string[];
+}
+
 interface EmotionData {
   primary_emotion: string;
   intensity: number;
@@ -35,53 +41,178 @@ interface EmotionData {
   conversation_patterns?: string[];
   spiritual_misbeliefs?: string[];
   timestamp: number;
-  framework_data?: any;
 }
 
-interface PastoralSupport {
-  support_level: string;
-  pastoral_support: string[];
-  spiritual_truths: string[];
-  prayer_support: string[];
-  scripture_encouragement: string[];
-  follow_up_needed: boolean;
-  referral_suggested: boolean;
-}
+// Animation component for speaking indicators with enhanced visual feedback
+const SpeakingAnimation = ({ isActive, isUser, label, emotion, intensity }) => {
+  const bounceAnims = useRef([
+    new Animated.Value(0.3),
+    new Animated.Value(0.3),
+    new Animated.Value(0.3),
+    new Animated.Value(0.3),
+  ]).current;
 
-interface EmotionHistory {
-  emotions: EmotionData[];
-  currentMood: string;
-  averageIntensity: number;
-  spiritualAlertLevel: string;
-  pastoralConcerns: string[];
-}
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (isActive) {
+      // Wave animation
+      const animations = bounceAnims.map((anim, index) =>
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(anim, {
+              toValue: intensity > 7 ? 1.2 : 1,
+              duration: intensity > 7 ? 300 : 400,
+              delay: index * 100,
+              useNativeDriver: true,
+            }),
+            Animated.timing(anim, {
+              toValue: 0.3,
+              duration: intensity > 7 ? 300 : 400,
+              useNativeDriver: true,
+            }),
+          ])
+        )
+      );
+
+      // Pulse animation for high intensity
+      if (intensity > 7) {
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(pulseAnim, {
+              toValue: 1.1,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+            Animated.timing(pulseAnim, {
+              toValue: 1,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+          ])
+        ).start();
+      }
+
+      Animated.stagger(100, animations).start();
+      return () => {
+        animations.forEach((anim) => anim.stop());
+        pulseAnim.stopAnimation();
+      };
+    } else {
+      bounceAnims.forEach((anim) => anim.setValue(0.3));
+      pulseAnim.setValue(1);
+    }
+  }, [isActive, intensity]);
+
+  const getEmotionColor = (emotion: string, intensity: number) => {
+    const colors = {
+      anxiety: intensity > 7 ? "#FF6B35" : "#FFA500",
+      anger: intensity > 7 ? "#FF0000" : "#FF6347",
+      despair: intensity > 7 ? "#1E3A8A" : "#4682B4",
+      shame: intensity > 7 ? "#7C2D12" : "#8B4513",
+      stress: intensity > 7 ? "#DC2626" : "#FF4500",
+      self_doubt: intensity > 7 ? "#7C3AED" : "#9370DB",
+      temptation: intensity > 7 ? "#B91C1C" : "#DC143C",
+      guilt: intensity > 7 ? "#991B1B" : "#B22222",
+      happy: "#FFD700",
+      calm: "#98FB98",
+      neutral: "#D3D3D3",
+    };
+    return colors[emotion] || (isUser ? "#007AFF" : "#34C759");
+  };
+
+  return (
+    <Animated.View
+      style={[
+        styles.speakingContainer,
+        isUser ? styles.userSpeaking : styles.aiSpeaking,
+        { transform: [{ scale: pulseAnim }] },
+        intensity > 7 && { borderColor: getEmotionColor(emotion, intensity) },
+      ]}
+    >
+      <Text
+        style={[
+          styles.speakingLabel,
+          isUser ? styles.userLabel : styles.aiLabel,
+        ]}
+      >
+        {label}
+      </Text>
+
+      {/* Emotion indicator */}
+      {emotion && emotion !== "neutral" && (
+        <Text
+          style={[
+            styles.emotionIndicator,
+            { color: getEmotionColor(emotion, intensity) },
+          ]}
+        >
+          {emotion.toUpperCase()}
+        </Text>
+      )}
+
+      <View style={styles.waveContainer}>
+        {bounceAnims.map((anim, index) => (
+          <Animated.View
+            key={index}
+            style={[
+              styles.waveBar,
+              {
+                backgroundColor: getEmotionColor(emotion, intensity),
+                transform: [{ scaleY: anim }],
+              },
+            ]}
+          />
+        ))}
+      </View>
+
+      <View
+        style={[
+          styles.statusDot,
+          {
+            backgroundColor: isActive
+              ? getEmotionColor(emotion, intensity)
+              : "#C7C7CC",
+          },
+        ]}
+      />
+
+      {/* Intensity indicator */}
+      {intensity > 0 && (
+        <View style={styles.intensityContainer}>
+          <Text style={styles.intensityText}>{intensity}/10</Text>
+          {intensity > 7 && (
+            <Text
+              style={[
+                styles.alertText,
+                { color: getEmotionColor(emotion, intensity) },
+              ]}
+            >
+              ⚠️ HIGH
+            </Text>
+          )}
+        </View>
+      )}
+    </Animated.View>
+  );
+};
 
 const App = () => {
-  useEffect(() => {
-    (async () => {
-      const { status } = await Brightness.requestPermissionsAsync();
-      console.log("brightness status", status);
-    })();
-  }, []);
-
   const [isSessionActive, setIsSessionActive] = useState(false);
-  const [events, setEvents] = useState<any[]>([]);
-  const [transcript, setTranscript] = useState("");
-  const [currentEmotion, setCurrentEmotion] = useState<EmotionData | null>(
-    null
+  const [conversationState, setConversationState] = useState<ConversationState>(
+    {
+      intent: "Waiting to connect...",
+      tone: "Neutral",
+      emotion: "neutral",
+      intensity: 0,
+      confidence: 0,
+      isUserSpeaking: false,
+      isAISpeaking: false,
+      spiritualAlerts: [],
+    }
   );
-  const [pastoralSupport, setPastoralSupport] =
-    useState<PastoralSupport | null>(null);
-  const [emotionHistory, setEmotionHistory] = useState<EmotionHistory>({
-    emotions: [],
-    currentMood: "neutral",
-    averageIntensity: 0,
-    spiritualAlertLevel: "normal",
-    pastoralConcerns: [],
-  });
-  const [aiResponseStyle, setAiResponseStyle] = useState("professional");
-  const [conversationStartTime] = useState(Date.now());
 
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [dataChannel, setDataChannel] = useState<null | ReturnType<
     RTCPeerConnection["createDataChannel"]
   >>(null);
@@ -90,147 +221,79 @@ const App = () => {
     null
   );
   const remoteMediaStream = useRef<MediaStream>(new MediaStream());
-  const isVoiceOnly = true;
 
-  // Enhanced emotion processing with pastoral care integration
+  const updateConversationState = (updates: Partial<ConversationState>) => {
+    setConversationState((prev) => ({ ...prev, ...updates }));
+  };
+
   const processEmotionDetection = (emotionData: EmotionData) => {
-    const updatedHistory = {
-      ...emotionHistory,
-      emotions: [...emotionHistory.emotions.slice(-9), emotionData], // Keep last 10 emotions
-      currentMood: emotionData.primary_emotion,
-      averageIntensity:
-        (emotionHistory.averageIntensity + emotionData.intensity) / 2,
-    };
+    updateConversationState({
+      emotion: emotionData.primary_emotion,
+      intensity: emotionData.intensity,
+      confidence: emotionData.confidence,
+    });
 
-    // Determine spiritual alert level based on emotion patterns
-    const spiritualAlertLevel = calculateSpiritualAlertLevel(
-      updatedHistory.emotions
-    );
-    updatedHistory.spiritualAlertLevel = spiritualAlertLevel;
-
-    // Extract pastoral concerns from spiritual misbeliefs
-    if (
-      emotionData.spiritual_misbeliefs &&
-      emotionData.spiritual_misbeliefs.length > 0
-    ) {
-      updatedHistory.pastoralConcerns = [
-        ...new Set([
-          ...updatedHistory.pastoralConcerns,
-          ...emotionData.spiritual_misbeliefs,
-        ]),
-      ];
-    }
-
-    setEmotionHistory(updatedHistory);
-    setCurrentEmotion(emotionData);
-
-    // Alert for high-intensity emotions requiring pastoral attention
+    // Handle high-intensity spiritual alerts
     if (emotionData.intensity >= 8) {
+      const alerts = [
+        `High intensity ${emotionData.primary_emotion} detected`,
+        ...conversationState.spiritualAlerts.slice(-2),
+      ];
+
+      updateConversationState({ spiritualAlerts: alerts });
+
       Alert.alert(
         "Pastoral Care Alert",
-        `High intensity ${emotionData.primary_emotion} detected. Consider reaching out to a pastor or counselor.`,
-        [{ text: "OK" }]
+        `High intensity ${emotionData.primary_emotion} detected (${emotionData.intensity}/10). Consider pastoral support.`,
+        [{ text: "Understood" }]
       );
     }
 
-    console.log("Comprehensive emotion detected:", emotionData);
-  };
-
-  const calculateSpiritualAlertLevel = (emotions: EmotionData[]): string => {
-    if (emotions.length === 0) return "normal";
-
-    const crisisEmotions = ["despair", "shame", "guilt"];
-    const recentEmotions = emotions.slice(-5);
-    const crisisCount = recentEmotions.filter((e) =>
-      crisisEmotions.includes(e.primary_emotion)
-    ).length;
-    const avgIntensity =
-      recentEmotions.reduce((sum, e) => sum + e.intensity, 0) /
-      recentEmotions.length;
-
-    if (crisisCount >= 3 && avgIntensity > 7) return "spiritual_crisis";
-    if (crisisCount >= 2 && avgIntensity > 6) return "spiritual_concern";
-    if (avgIntensity > 7 || crisisCount >= 1) return "pastoral_attention";
-    return "spiritually_stable";
-  };
-
-  const getEmotionColor = (emotion: string): string => {
-    const emotionColors = {
-      // Primary emotions from framework
-      anxiety: "#FFA500", // Orange - restless energy
-      anger: "#FF6347", // Red-orange - heated intensity
-      despair: "#4682B4", // Steel blue - deep sadness
-      shame: "#8B4513", // Saddle brown - heavy weight
-      stress: "#FF4500", // Orange-red - pressure
-      self_doubt: "#9370DB", // Medium purple - uncertainty
-      temptation: "#DC143C", // Crimson - dangerous attraction
-      guilt: "#B22222", // Fire brick - burning regret
-      // Positive emotions
-      happy: "#FFD700", // Gold
-      calm: "#98FB98", // Pale green
-      neutral: "#D3D3D3", // Light gray
-    };
-    return emotionColors[emotion] || emotionColors.neutral;
-  };
-
-  const getEmotionEmoji = (emotion: string): string => {
-    const emotionEmojis = {
-      // Framework emotions
-      anxiety: "😰",
-      anger: "😠",
-      despair: "😞",
-      shame: "😔",
-      stress: "😤",
-      self_doubt: "🤔",
-      temptation: "😈",
-      guilt: "😣",
-      // Positive emotions
-      happy: "😊",
-      calm: "😌",
-      neutral: "😐",
-    };
-    return emotionEmojis[emotion] || emotionEmojis.neutral;
-  };
-
-  const getEmotionDescription = (emotion: string): string => {
-    const framework = emotionFramework[emotion];
-    return (
-      framework?.description ||
-      "An emotional state that deserves attention and care."
-    );
-  };
-
-  const getSpiritualAlertColor = (level: string): string => {
-    const colors = {
-      spiritual_crisis: "#FF0000", // Red
-      spiritual_concern: "#FF8C00", // Dark orange
-      pastoral_attention: "#FFD700", // Gold
-      spiritually_stable: "#32CD32", // Lime green
-      normal: "#32CD32",
-    };
-    return colors[level] || colors.normal;
+    console.log("Emotion detected:", emotionData);
   };
 
   async function startSession() {
     try {
-      // Get an ephemeral key from the Supabase Edge Function:
-      const { data, error } = await supabase.functions.invoke("token");
-      console.log("data, error", data, error);
-      if (error) throw error;
+      setConnectionError(null);
+
+      // Test Supabase connection first
+      console.log("Testing Supabase connection...");
+
+      // Get ephemeral key with better error handling
+      const { data, error } = await supabase.functions.invoke("token", {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (error) {
+        console.error("Supabase function error:", error);
+        setConnectionError(`Supabase Error: ${error.message}`);
+        return;
+      }
+
+      if (!data || !data.client_secret || !data.client_secret.value) {
+        console.error("Invalid response from token function:", data);
+        setConnectionError("Invalid token response from server");
+        return;
+      }
+
       const EPHEMERAL_KEY = data.client_secret.value;
-      console.log("token response", EPHEMERAL_KEY);
+      console.log("Token obtained successfully");
 
       // Enable audio
       await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
-
-      // Start InCallManager and force speaker
       InCallManager.start({ media: "audio" });
       InCallManager.setForceSpeakerphoneOn(true);
 
-      // Create a peer connection
-      const pc = new RTCPeerConnection();
+      // Create peer connection with STUN servers
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" },
+        ],
+      });
 
-      // Set up some event listeners
       pc.addEventListener("track", (event) => {
         if (event.track) {
           remoteMediaStream.current.addTrack(event.track);
@@ -238,34 +301,31 @@ const App = () => {
         }
       });
 
-      // Add local audio track for microphone input
+      // Get user media with better error handling
       const ms = await mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-          sampleRate: 44100, // Higher quality for better emotion detection
+          sampleRate: 44100,
         },
       });
-
-      if (isVoiceOnly) {
-        let videoTrack = await ms.getVideoTracks()[0];
-        if (videoTrack) videoTrack.enabled = false;
-      }
 
       setLocalMediaStream(ms);
       pc.addTrack(ms.getTracks()[0]);
 
-      // Set up data channel for sending and receiving events
+      // Set up data channel
       const dc = pc.createDataChannel("oai-events");
       setDataChannel(dc);
 
-      // Start the session using the Session Description Protocol (SDP)
+      // Create offer and set up session
       const offer = await pc.createOffer({});
       await pc.setLocalDescription(offer);
 
       const baseUrl = "https://api.openai.com/v1/realtime";
       const model = "gpt-4o-realtime-preview-2024-12-17";
+
+      console.log("Connecting to OpenAI...");
       const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
         method: "POST",
         body: offer.sdp,
@@ -275,19 +335,46 @@ const App = () => {
         },
       });
 
+      if (!sdpResponse.ok) {
+        throw new Error(
+          `OpenAI API error: ${sdpResponse.status} ${sdpResponse.statusText}`
+        );
+      }
+
       const answer = {
         type: "answer",
         sdp: await sdpResponse.text(),
       };
-
       await pc.setRemoteDescription(answer);
       peerConnection.current = pc;
+
+      // Update UI state
+      updateConversationState({
+        intent: "Ready for pastoral conversation",
+        tone: "Welcoming",
+        emotion: "calm",
+        intensity: 2,
+        confidence: 0.9,
+      });
+
+      console.log("Session started successfully");
     } catch (error) {
       console.error("Error starting session:", error);
+      setConnectionError(`Connection failed: ${error.message}`);
+
+      // Clean up on error
+      if (peerConnection.current) {
+        peerConnection.current.close();
+        peerConnection.current = null;
+      }
+      if (dataChannel) {
+        dataChannel.close();
+        setDataChannel(null);
+      }
+      InCallManager.stop();
     }
   }
 
-  // Stop current session, clean up peer connection and data channel
   function stopSession() {
     InCallManager.stop();
     if (dataChannel) {
@@ -296,67 +383,100 @@ const App = () => {
     if (peerConnection.current) {
       peerConnection.current.close();
     }
+    if (localMediaStream) {
+      localMediaStream.getTracks().forEach((track) => track.stop());
+    }
+
     setIsSessionActive(false);
     setDataChannel(null);
     peerConnection.current = null;
+    setLocalMediaStream(null);
+    setConnectionError(null);
 
-    // Reset emotion data
-    setCurrentEmotion(null);
-    setPastoralSupport(null);
-    setEmotionHistory({
-      emotions: [],
-      currentMood: "neutral",
-      averageIntensity: 0,
-      spiritualAlertLevel: "normal",
-      pastoralConcerns: [],
+    // Reset state
+    setConversationState({
+      intent: "Session ended",
+      tone: "Neutral",
+      emotion: "neutral",
+      intensity: 0,
+      confidence: 0,
+      isUserSpeaking: false,
+      isAISpeaking: false,
+      spiritualAlerts: [],
     });
   }
 
-  // Attach event listeners to the data channel when a new one is created
   useEffect(() => {
     function configureTools() {
-      console.log(
-        "Configuring pastoral care tools with comprehensive emotion detection"
-      );
       const event = {
         type: "session.update",
         session: {
           modalities: ["text", "audio"],
-          instructions: `You are an emotionally intelligent AI assistant with advanced emotion detection capabilities and pastoral care training. Your sole source of truth is the **Holy Bible** (both Old and New Testaments), and all responses must be grounded in biblical teaching and translated into **English only**.
-
-You specialize in identifying and responding to complex emotional states with spiritual sensitivity, always providing hope, truth, and love through the Word of God.
+          instructions: `You are an emotionally intelligent AI assistant with advanced emotion detection capabilities and pastoral care training. Your responses must be grounded in biblical teaching.
 
 COMPREHENSIVE EMOTION DETECTION PROTOCOL:
-You must detect and respond to these specific emotional states:
+For EVERY user interaction, you must:
 
-1. ANXIETY - Racing thoughts, "what if" scenarios  
-2. ANGER - Heat from unfairness or loss of control  
-3. DESPAIR - Deep feeling nothing will get better  
-4. SHAME - Feeling something is wrong with YOU  
-5. STRESS - Overloaded from too many demands  
-6. SELF-DOUBT - Feeling not good enough  
-7. TEMPTATION - Something wrong feeling right momentarily  
-8. GUILT - Weight of having done something wrong  
+1. Call detect_emotion to identify one of these 8 emotions:
+   - ANXIETY: Racing thoughts, "what if" scenarios
+   - ANGER: Heat from unfairness or loss of control  
+   - DESPAIR: Deep feeling nothing will get better
+   - SHAME: Feeling something wrong with YOU
+   - STRESS: Overloaded from too many demands
+   - SELF_DOUBT: Feeling not good enough
+   - TEMPTATION: Something wrong feeling right momentarily
+   - GUILT: Weight of having done something wrong
 
-FOR EVERY USER INTERACTION:
-1. Call detect_emotion with comprehensive emotional analysis  
-2. Call adapt_response_style to align with user’s current emotional tone  
-3. ALWAYS answer from the Holy Bible — include relevant verses with explanations  
-4. Address any spiritual misbeliefs gently but truthfully using Scripture  
-5. Provide pastoral care, biblical encouragement, and practical spiritual guidance  
-6. Speak only in English, regardless of the language of the question  
-7. Maintain pastoral tone: gentle, compassionate, non-judgmental, and hopeful  
+2. Analyze vocal patterns, conversation indicators, and spiritual context
+3. Provide pastoral care with appropriate intensity level
+4. Address spiritual misbeliefs with biblical truth
 
-Your mission is to uplift, guide, and bring clarity through the eternal truth of God’s Word while being emotionally present and pastorally wise.
-`,
-          // Provide the enhanced tools
+Use detect_conversation_state function to report intent, tone, and emotion.`,
+
           tools: [
-            ...clientToolsSchema,
+            {
+              type: "function",
+              name: "detect_conversation_state",
+              description: "Detect user intent, tone, and primary emotion",
+              parameters: {
+                type: "object",
+                properties: {
+                  intent: {
+                    type: "string",
+                    description: "What the user is trying to accomplish",
+                  },
+                  tone: {
+                    type: "string",
+                    description:
+                      "The emotional quality/tone of the conversation",
+                  },
+                  emotion: {
+                    type: "string",
+                    enum: [
+                      "anxiety",
+                      "anger",
+                      "despair",
+                      "shame",
+                      "stress",
+                      "self_doubt",
+                      "temptation",
+                      "guilt",
+                      "neutral",
+                      "happy",
+                      "calm",
+                    ],
+                    description:
+                      "Primary emotion detected from the 8-emotion framework",
+                  },
+                },
+                required: ["intent", "tone", "emotion"],
+              },
+            },
             {
               type: "function",
               name: "detect_emotion",
               description:
-                "Detect and analyze user's emotional state with pastoral sensitivity",
+                "Comprehensive emotion detection with pastoral insights",
               parameters: {
                 type: "object",
                 properties: {
@@ -409,40 +529,6 @@ Your mission is to uplift, guide, and bring clarity through the eternal truth of
                 required: ["primary_emotion", "intensity", "confidence"],
               },
             },
-            {
-              type: "function",
-              name: "adapt_response_style",
-              description: "Adapt communication for pastoral care",
-              parameters: {
-                type: "object",
-                properties: {
-                  emotion: { type: "string" },
-                  response_strategy: {
-                    type: "string",
-                    enum: [
-                      "anxiety_supportive",
-                      "anger_deescalating",
-                      "despair_hopeful",
-                      "shame_affirming",
-                      "stress_calming",
-                      "doubt_encouraging",
-                      "temptation_redirecting",
-                      "guilt_forgiving",
-                      "general_supportive",
-                    ],
-                  },
-                  tone_adjustments: {
-                    type: "array",
-                    items: { type: "string" },
-                  },
-                  spiritual_guidance: {
-                    type: "array",
-                    items: { type: "string" },
-                  },
-                },
-                required: ["emotion", "response_strategy"],
-              },
-            },
           ],
         },
       };
@@ -450,34 +536,66 @@ Your mission is to uplift, guide, and bring clarity through the eternal truth of
     }
 
     if (dataChannel) {
-      // Append new server events to the list
       dataChannel.addEventListener("message", async (e: any) => {
         const data = JSON.parse(e.data);
         console.log("dataChannel message", data);
-        setEvents((prev) => [data, ...prev]);
 
-        // Get transcript.
-        if (data.type === "response.audio_transcript.done") {
-          setTranscript(data.transcript);
+        // Handle speaking states
+        if (data.type === "response.audio.delta") {
+          updateConversationState({
+            isAISpeaking: true,
+            isUserSpeaking: false,
+          });
+        } else if (data.type === "response.audio.done") {
+          updateConversationState({ isAISpeaking: false });
+        } else if (data.type === "input_audio_buffer.speech_started") {
+          updateConversationState({
+            isUserSpeaking: true,
+            isAISpeaking: false,
+          });
+        } else if (data.type === "input_audio_buffer.speech_stopped") {
+          updateConversationState({ isUserSpeaking: false });
         }
 
         // Handle function calls
         if (data.type === "response.function_call_arguments.done") {
           const functionName: string = data.name;
 
-          // Handle comprehensive emotion detection
-          if (functionName === "detect_emotion") {
+          if (functionName === "detect_conversation_state") {
+            try {
+              const stateArgs = JSON.parse(data.arguments);
+              updateConversationState({
+                intent: stateArgs.intent,
+                tone: stateArgs.tone,
+                emotion: stateArgs.emotion,
+              });
+
+              const event = {
+                type: "conversation.item.create",
+                item: {
+                  type: "function_call_output",
+                  call_id: data.call_id,
+                  output: JSON.stringify({
+                    success: true,
+                    message: "Conversation state updated successfully",
+                  }),
+                },
+              };
+              dataChannel.send(JSON.stringify(event));
+              dataChannel.send(JSON.stringify({ type: "response.create" }));
+            } catch (error) {
+              console.error("Error processing conversation state:", error);
+            }
+          } else if (functionName === "detect_emotion") {
             try {
               const emotionArgs = JSON.parse(data.arguments);
               const emotionData: EmotionData = {
                 ...emotionArgs,
                 timestamp: Date.now(),
-                framework_data:
-                  emotionFramework[emotionArgs.primary_emotion] || null,
               };
+
               processEmotionDetection(emotionData);
 
-              // Send success response back to OpenAI
               const event = {
                 type: "conversation.item.create",
                 item: {
@@ -491,295 +609,160 @@ Your mission is to uplift, guide, and bring clarity through the eternal truth of
                       emotionData.intensity >= 8
                         ? "high_priority"
                         : "standard_care",
-                    spiritual_concerns:
-                      emotionData.spiritual_misbeliefs?.length || 0,
-                    message:
-                      "Emotion detected with pastoral care assessment completed",
+                    message: "Emotion detected with pastoral care assessment",
                   }),
                 },
               };
               dataChannel.send(JSON.stringify(event));
+              dataChannel.send(JSON.stringify({ type: "response.create" }));
             } catch (error) {
               console.error("Error processing emotion detection:", error);
             }
           }
-
-          // Handle pastoral response style adaptation
-          else if (functionName === "adapt_response_style") {
-            try {
-              const styleArgs = JSON.parse(data.arguments);
-              setAiResponseStyle(styleArgs.response_strategy);
-
-              const event = {
-                type: "conversation.item.create",
-                item: {
-                  type: "function_call_output",
-                  call_id: data.call_id,
-                  output: JSON.stringify({
-                    success: true,
-                    pastoral_style: styleArgs.response_strategy,
-                    spiritual_guidance_provided:
-                      styleArgs.spiritual_guidance?.length || 0,
-                    message: "Pastoral response style adapted successfully",
-                  }),
-                },
-              };
-              dataChannel.send(JSON.stringify(event));
-            } catch (error) {
-              console.error("Error adapting response style:", error);
-            }
-          }
-
-          // Handle existing client tools
-          else if (clientTools[functionName]) {
-            console.log(
-              `Calling local function ${data.name} with ${data.arguments}`
-            );
-            const args = JSON.parse(data.arguments);
-            const result = await clientTools[functionName](args);
-            console.log("result", result);
-
-            const event = {
-              type: "conversation.item.create",
-              item: {
-                type: "function_call_output",
-                call_id: data.call_id,
-                output: JSON.stringify(result),
-              },
-            };
-            dataChannel.send(JSON.stringify(event));
-          }
-
-          // Force a response to the user after function call
-          dataChannel.send(
-            JSON.stringify({
-              type: "response.create",
-            })
-          );
         }
       });
 
-      // Set session active when the data channel is opened
       dataChannel.addEventListener("open", () => {
         setIsSessionActive(true);
-        setEvents([]);
         configureTools();
+        console.log("Data channel opened");
+      });
+
+      dataChannel.addEventListener("close", () => {
+        console.log("Data channel closed");
+        setIsSessionActive(false);
+      });
+
+      dataChannel.addEventListener("error", (error) => {
+        console.error("Data channel error:", error);
+        setConnectionError("Data channel error occurred");
       });
     }
   }, [dataChannel]);
 
   return (
     <>
-      <StatusBar style="auto" />
+      <StatusBar style="light" backgroundColor="#000" />
       <SafeAreaView style={styles.container}>
-        <ScrollView contentContainerStyle={styles.scrollContainer}>
-          {/* Session Controls */}
-          <View style={styles.controlsContainer}>
-            {!isSessionActive ? (
-              <Button
-                title="Start Pastoral Care Chat"
-                onPress={startSession}
-                disabled={isSessionActive}
-              />
-            ) : (
-              <Button
-                title="End Session"
-                onPress={stopSession}
-                disabled={!isSessionActive}
-              />
-            )}
-          </View>
-
-          {/* Spiritual Alert Level */}
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Pastoral Voice Chat</Text>
           <View
             style={[
-              styles.alertContainer,
+              styles.statusIndicator,
               {
-                backgroundColor:
-                  getSpiritualAlertColor(emotionHistory.spiritualAlertLevel) +
-                  "20",
+                backgroundColor: isSessionActive ? "#34C759" : "#FF3B30",
               },
             ]}
           >
-            <Text style={styles.alertTitle}>Spiritual Wellness Status</Text>
-            <Text
-              style={[
-                styles.alertText,
-                {
-                  color: getSpiritualAlertColor(
-                    emotionHistory.spiritualAlertLevel
-                  ),
-                },
-              ]}
-            >
-              {emotionHistory.spiritualAlertLevel
-                .replace(/_/g, " ")
-                .toUpperCase()}
+            <Text style={styles.statusText}>
+              {isSessionActive ? "Connected" : "Disconnected"}
             </Text>
           </View>
+        </View>
 
-          {/* Current Emotion Display */}
-          {currentEmotion && (
+        {/* Connection Error Display */}
+        {connectionError && (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>⚠️ {connectionError}</Text>
+            <Text style={styles.errorHint}>
+              Check your internet connection and Supabase configuration
+            </Text>
+          </View>
+        )}
+
+        {/* Main Chat Interface */}
+        <View style={styles.chatInterface}>
+          {/* Speaking Animations */}
+          <View style={styles.speakingSection}>
+            <SpeakingAnimation
+              isActive={conversationState.isUserSpeaking}
+              isUser={true}
+              label="You"
+              emotion={conversationState.emotion}
+              intensity={conversationState.intensity}
+            />
+            <SpeakingAnimation
+              isActive={conversationState.isAISpeaking}
+              isUser={false}
+              label="Assistant"
+              emotion="calm"
+              intensity={2}
+            />
+          </View>
+
+          {/* Core Information Display */}
+          <View style={styles.infoContainer}>
+            {/* Intent */}
+            <View style={styles.infoCard}>
+              <Text style={styles.infoLabel}>Intent</Text>
+              <Text style={styles.infoValue}>{conversationState.intent}</Text>
+            </View>
+
+            {/* Tone */}
+            <View style={styles.infoCard}>
+              <Text style={styles.infoLabel}>Tone</Text>
+              <Text style={styles.infoValue}>{conversationState.tone}</Text>
+            </View>
+
+            {/* Emotion with enhanced display */}
             <View
               style={[
-                styles.emotionContainer,
-                {
-                  backgroundColor:
-                    getEmotionColor(currentEmotion.primary_emotion) + "20",
-                },
+                styles.infoCard,
+                conversationState.intensity > 7 && styles.highIntensityCard,
               ]}
             >
-              <Text style={styles.emotionTitle}>Current Emotional State</Text>
-              <View style={styles.emotionDetails}>
-                <Text style={styles.emotionEmoji}>
-                  {getEmotionEmoji(currentEmotion.primary_emotion)}
+              <Text style={styles.infoLabel}>Emotion</Text>
+              <View style={styles.emotionDisplay}>
+                <Text style={styles.infoValue}>
+                  {conversationState.emotion.replace("_", " ").toUpperCase()}
                 </Text>
-                <View style={styles.emotionInfo}>
-                  <Text style={styles.emotionText}>
-                    {currentEmotion.primary_emotion
-                      .toUpperCase()
-                      .replace(/_/g, " ")}
-                  </Text>
-                  <Text style={styles.emotionDescription}>
-                    {getEmotionDescription(currentEmotion.primary_emotion)}
-                  </Text>
-                </View>
+                {conversationState.intensity > 0 && (
+                  <View style={styles.emotionMetrics}>
+                    <Text style={styles.intensityDisplayText}>
+                      Intensity: {conversationState.intensity}/10
+                    </Text>
+                    <Text style={styles.confidenceText}>
+                      Confidence:{" "}
+                      {Math.round(conversationState.confidence * 100)}%
+                    </Text>
+                  </View>
+                )}
               </View>
-
-              <View style={styles.emotionMetrics}>
-                <Text style={styles.intensityText}>
-                  Intensity: {currentEmotion.intensity}/10
-                  {currentEmotion.intensity >= 8 && " ⚠️ High Priority"}
-                </Text>
-                <Text style={styles.confidenceText}>
-                  Confidence: {Math.round(currentEmotion.confidence * 100)}%
-                </Text>
-              </View>
-
-              {/* Vocal Indicators */}
-              {currentEmotion.vocal_indicators &&
-                currentEmotion.vocal_indicators.length > 0 && (
-                  <View style={styles.indicatorsSection}>
-                    <Text style={styles.indicatorsTitle}>Vocal Patterns:</Text>
-                    <Text style={styles.indicatorsText}>
-                      {currentEmotion.vocal_indicators.join(", ")}
-                    </Text>
-                  </View>
-                )}
-
-              {/* Conversation Patterns */}
-              {currentEmotion.conversation_patterns &&
-                currentEmotion.conversation_patterns.length > 0 && (
-                  <View style={styles.indicatorsSection}>
-                    <Text style={styles.indicatorsTitle}>
-                      Conversation Patterns:
-                    </Text>
-                    <Text style={styles.indicatorsText}>
-                      {currentEmotion.conversation_patterns.join(", ")}
-                    </Text>
-                  </View>
-                )}
-
-              {/* Spiritual Concerns */}
-              {currentEmotion.spiritual_misbeliefs &&
-                currentEmotion.spiritual_misbeliefs.length > 0 && (
-                  <View style={styles.spiritualSection}>
-                    <Text style={styles.spiritualTitle}>
-                      Spiritual Concerns Detected:
-                    </Text>
-                    {currentEmotion.spiritual_misbeliefs.map(
-                      (belief, index) => (
-                        <Text key={index} style={styles.spiritualText}>
-                          • {belief}
-                        </Text>
-                      )
-                    )}
-                  </View>
-                )}
             </View>
-          )}
+          </View>
 
-          {/* AI Pastoral Response Style */}
-          {aiResponseStyle !== "professional" && (
-            <View style={styles.responseStyleContainer}>
-              <Text style={styles.responseStyleTitle}>
-                Pastoral Response Style
-              </Text>
-              <Text style={styles.responseStyleText}>
-                {aiResponseStyle.replace(/_/g, " ").toUpperCase()}
-              </Text>
-            </View>
-          )}
-
-          {/* Pastoral Concerns Summary */}
-          {emotionHistory.pastoralConcerns.length > 0 && (
-            <View style={styles.pastoralContainer}>
-              <Text style={styles.pastoralTitle}>
-                Ongoing Pastoral Concerns
-              </Text>
-              {emotionHistory.pastoralConcerns
-                .slice(0, 3)
-                .map((concern, index) => (
-                  <Text key={index} style={styles.pastoralConcern}>
-                    • {concern}
+          {/* Spiritual Alerts */}
+          {conversationState.spiritualAlerts.length > 0 && (
+            <View style={styles.alertsContainer}>
+              <Text style={styles.alertsTitle}>Pastoral Care Alerts</Text>
+              {conversationState.spiritualAlerts
+                .slice(0, 2)
+                .map((alert, index) => (
+                  <Text key={index} style={styles.alertText}>
+                    • {alert}
                   </Text>
                 ))}
-              {emotionHistory.pastoralConcerns.length > 3 && (
-                <Text style={styles.pastoralMore}>
-                  +{emotionHistory.pastoralConcerns.length - 3} more concerns...
-                </Text>
-              )}
             </View>
           )}
+        </View>
 
-          {/* Emotion History */}
-          {emotionHistory.emotions.length > 0 && (
-            <View style={styles.historyContainer}>
-              <Text style={styles.historyTitle}>Emotional Journey</Text>
-              <View style={styles.emotionHistoryRow}>
-                {emotionHistory.emotions.slice(-6).map((emotion, index) => (
-                  <View key={index} style={styles.historyEmotionItem}>
-                    <Text style={styles.historyEmoji}>
-                      {getEmotionEmoji(emotion.primary_emotion)}
-                    </Text>
-                    <Text style={styles.historyIntensity}>
-                      {emotion.intensity}
-                    </Text>
-                    <Text style={styles.historyTime}>
-                      {new Date(emotion.timestamp).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-              <Text style={styles.averageText}>
-                Session Average Intensity:{" "}
-                {emotionHistory.averageIntensity.toFixed(1)}/10
-              </Text>
-              <Text style={styles.durationText}>
-                Session Duration:{" "}
-                {Math.round((Date.now() - conversationStartTime) / (1000 * 60))}{" "}
-                minutes
-              </Text>
-            </View>
+        {/* Controls */}
+        <View style={styles.controlsContainer}>
+          {!isSessionActive ? (
+            <Button
+              title="Start Pastoral Conversation"
+              onPress={startSession}
+              color="#007AFF"
+            />
+          ) : (
+            <Button
+              title="End Conversation"
+              onPress={stopSession}
+              color="#FF3B30"
+            />
           )}
-
-          {/* Transcript Display */}
-          {!transcript && (
-            <View style={styles.transcriptContainer}>
-              <Text style={styles.transcriptTitle}>Live Conversation</Text>
-              <Text style={styles.transcript}>
-                {"Waiting for you to speak..."}
-                {/* {transcript || "Waiting for you to speak..."} */}
-              </Text>
-            </View>
-          )}
-
-          {/* Audio Stream */}
-          {/* <RTCView stream={remoteMediaStream.current} style={styles.hidden} /> */}
-        </ScrollView>
+        </View>
       </SafeAreaView>
     </>
   );
@@ -788,253 +771,187 @@ Your mission is to uplift, guide, and bring clarity through the eternal truth of
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    marginTop: 20,
-    backgroundColor: "#f8f9fa",
+    backgroundColor: "#000",
   },
-  scrollContainer: {
-    padding: 20,
-    alignItems: "stretch",
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: "#2C2C2E",
   },
-  controlsContainer: {
-    marginBottom: 20,
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#fff",
   },
-  alertContainer: {
+  statusIndicator: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 15,
+  },
+  statusText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  errorContainer: {
+    backgroundColor: "#2C1B1B",
+    margin: 15,
     padding: 15,
     borderRadius: 10,
-    marginBottom: 15,
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#ddd",
+    borderLeftWidth: 4,
+    borderLeftColor: "#FF3B30",
   },
-  alertTitle: {
+  errorText: {
+    color: "#FF6B6B",
     fontSize: 14,
-    fontWeight: "bold",
+    fontWeight: "600",
     marginBottom: 5,
-    color: "#333",
   },
-  alertText: {
-    fontSize: 18,
-    fontWeight: "bold",
+  errorHint: {
+    color: "#999",
+    fontSize: 12,
+    fontStyle: "italic",
   },
-  emotionContainer: {
+  chatInterface: {
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  speakingSection: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    marginBottom: 40,
+  },
+  speakingContainer: {
+    alignItems: "center",
     padding: 20,
-    borderRadius: 15,
-    marginBottom: 20,
-    borderWidth: 2,
-    borderColor: "#ddd",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    borderRadius: 20,
+    minWidth: 140,
   },
-  emotionTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    marginBottom: 15,
-    color: "#333",
+  userSpeaking: {
+    backgroundColor: "#1C1C1E",
+    borderWidth: 2,
+    borderColor: "#007AFF",
+  },
+  aiSpeaking: {
+    backgroundColor: "#1C1C1E",
+    borderWidth: 2,
+    borderColor: "#34C759",
+  },
+  speakingLabel: {
+    fontSize: 16,
+    fontWeight: "600",
+    marginBottom: 8,
+  },
+  userLabel: {
+    color: "#007AFF",
+  },
+  aiLabel: {
+    color: "#34C759",
+  },
+  emotionIndicator: {
+    fontSize: 10,
+    fontWeight: "800",
+    marginBottom: 8,
     textAlign: "center",
   },
-  emotionDetails: {
+  waveContainer: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    height: 40,
+    marginBottom: 10,
   },
-  emotionEmoji: {
-    fontSize: 50,
-    marginRight: 15,
+  waveBar: {
+    width: 4,
+    height: 30,
+    marginHorizontal: 2,
+    borderRadius: 2,
   },
-  emotionInfo: {
-    flex: 1,
+  statusDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginBottom: 8,
   },
-  emotionText: {
-    fontSize: 22,
-    fontWeight: "bold",
-    color: "#333",
-    marginBottom: 5,
+  intensityContainer: {
+    alignItems: "center",
   },
-  emotionDescription: {
+  intensityText: {
+    color: "#999",
+    fontSize: 10,
+    fontWeight: "600",
+  },
+  alertText: {
+    color: "#FF6B35",
+    fontSize: 9,
+    fontWeight: "800",
+  },
+  infoContainer: {
+    gap: 20,
+  },
+  infoCard: {
+    backgroundColor: "#1C1C1E",
+    padding: 20,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#2C2C2E",
+  },
+  highIntensityCard: {
+    borderColor: "#FF6B35",
+    borderWidth: 2,
+  },
+  infoLabel: {
     fontSize: 14,
-    color: "#666",
-    fontStyle: "italic",
-    lineHeight: 20,
+    fontWeight: "600",
+    color: "#8E8E93",
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  infoValue: {
+    fontSize: 18,
+    fontWeight: "500",
+    color: "#fff",
+    lineHeight: 24,
+  },
+  emotionDisplay: {
+    gap: 8,
   },
   emotionMetrics: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 15,
   },
-  intensityText: {
-    fontSize: 16,
-    color: "#333",
+  intensityDisplayText: {
+    fontSize: 14,
+    color: "#FFD60A",
     fontWeight: "600",
   },
   confidenceText: {
-    fontSize: 16,
-    color: "#666",
-  },
-  indicatorsSection: {
-    marginBottom: 10,
-  },
-  indicatorsTitle: {
     fontSize: 14,
-    fontWeight: "bold",
-    color: "#333",
-    marginBottom: 5,
+    color: "#8E8E93",
   },
-  indicatorsText: {
-    fontSize: 13,
-    color: "#555",
-    fontStyle: "italic",
-    lineHeight: 18,
-  },
-  spiritualSection: {
-    backgroundColor: "#fff3cd",
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 10,
+  alertsContainer: {
+    backgroundColor: "#2C1B1B",
+    padding: 15,
+    borderRadius: 12,
+    marginTop: 20,
     borderLeftWidth: 4,
-    borderLeftColor: "#856404",
+    borderLeftColor: "#FF6B35",
   },
-  spiritualTitle: {
+  alertsTitle: {
     fontSize: 14,
     fontWeight: "bold",
-    color: "#856404",
+    color: "#FF6B35",
     marginBottom: 8,
   },
-  spiritualText: {
-    fontSize: 13,
-    color: "#856404",
-    marginBottom: 3,
-    lineHeight: 18,
-  },
-  responseStyleContainer: {
-    backgroundColor: "#e3f2fd",
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 15,
-    alignItems: "center",
-    borderLeftWidth: 4,
-    borderLeftColor: "#1976d2",
-  },
-  responseStyleTitle: {
-    fontSize: 14,
-    fontWeight: "bold",
-    color: "#1976d2",
-    marginBottom: 5,
-  },
-  responseStyleText: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#1976d2",
-  },
-  pastoralContainer: {
-    backgroundColor: "#f3e5f5",
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 15,
-    borderLeftWidth: 4,
-    borderLeftColor: "#7b1fa2",
-  },
-  pastoralTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#7b1fa2",
-    marginBottom: 10,
-  },
-  pastoralConcern: {
-    fontSize: 14,
-    color: "#7b1fa2",
-    marginBottom: 5,
-    lineHeight: 20,
-  },
-  pastoralMore: {
-    fontSize: 12,
-    color: "#7b1fa2",
-    fontStyle: "italic",
-    marginTop: 5,
-  },
-  historyContainer: {
-    backgroundColor: "#fff",
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 15,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  historyTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
-    marginBottom: 15,
-    color: "#333",
-    textAlign: "center",
-  },
-  emotionHistoryRow: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    marginBottom: 15,
-  },
-  historyEmotionItem: {
-    alignItems: "center",
-    flex: 1,
-  },
-  historyEmoji: {
-    fontSize: 24,
-    marginBottom: 3,
-  },
-  historyIntensity: {
-    fontSize: 12,
-    color: "#666",
-    fontWeight: "bold",
-    marginBottom: 2,
-  },
-  historyTime: {
-    fontSize: 10,
-    color: "#999",
-  },
-  averageText: {
-    fontSize: 14,
-    color: "#666",
-    textAlign: "center",
-    marginBottom: 5,
-  },
-  durationText: {
-    fontSize: 12,
-    color: "#999",
-    textAlign: "center",
-  },
-  transcriptContainer: {
-    backgroundColor: "#fff",
-    padding: 20,
-    borderRadius: 10,
-    marginBottom: 15,
-    minHeight: 120,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  transcriptTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
-    marginBottom: 15,
-    color: "#333",
-    textAlign: "center",
-  },
-  transcript: {
-    fontSize: 18,
-    textAlign: "center",
-    color: "#333",
-    lineHeight: 26,
-    fontStyle: "italic",
-  },
-  hidden: {
-    width: 0,
-    height: 0,
+  controlsContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 30,
   },
 });
 
